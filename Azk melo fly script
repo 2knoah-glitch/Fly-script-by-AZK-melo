@@ -1,0 +1,351 @@
+-- Services
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+
+-- Local Player
+local player = Players.LocalPlayer
+local mouse = player:GetMouse()
+
+-- Flying Variables
+local flying = false
+local flySpeed = 50 -- Default fly speed
+local maxSpeed = 400 -- Maximum fly speed
+local controls = {f = 0, b = 0, u = 0, d = 0} -- f: forward (straight), b: backward, u: up, d: down
+local isMinimized = false
+local lastValidSpeed = flySpeed
+
+-- GUI Creation
+local gui = Instance.new("ScreenGui")
+gui.Name = "FlyToggleGui"
+gui.Parent = player:WaitForChild("PlayerGui")
+gui.IgnoreGuiInset = true -- Ensures GUI is not offset by topbar on mobile
+gui.ResetOnSpawn = false -- Prevents GUI from resetting on character respawn
+
+-- Main Toggle Frame
+local frame = Instance.new("Frame")
+frame.Size = UDim2.new(0, 150, 0, 150)
+frame.Position = UDim2.new(0.5, -75, 0.2, 0) -- Centered higher for mobile
+frame.BackgroundColor3 = Color3.fromRGB(0, 0, 0) -- Black
+frame.BorderSizePixel = 0
+frame.Parent = gui
+
+-- Minimize Button
+local minimizeButton = Instance.new("TextButton")
+minimizeButton.Size = UDim2.new(0, 30, 0, 30)
+minimizeButton.Position = UDim2.new(1, -35, 0, 5)
+minimizeButton.Text = "-"
+minimizeButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+minimizeButton.BackgroundColor3 = Color3.fromRGB(0, 0, 0) -- Black
+minimizeButton.TextScaled = true
+minimizeButton.Parent = frame
+
+-- Toggle Button
+local toggleButton = Instance.new("TextButton")
+toggleButton.Size = UDim2.new(1, -10, 0, 40)
+toggleButton.Position = UDim2.new(0, 5, 0, 40)
+toggleButton.Text = "Toggle"
+toggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleButton.BackgroundColor3 = Color3.fromRGB(0, 0, 0) -- Black
+toggleButton.TextScaled = true
+toggleButton.Parent = frame
+
+-- Speed Input
+local speedLabel = Instance.new("TextLabel")
+speedLabel.Size = UDim2.new(1, -10, 0, 20)
+speedLabel.Position = UDim2.new(0, 5, 0, 85)
+speedLabel.Text = "Speed:"
+speedLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+speedLabel.BackgroundTransparency = 1
+speedLabel.TextScaled = true
+speedLabel.Parent = frame
+
+local speedTextBox = Instance.new("TextBox")
+speedTextBox.Size = UDim2.new(1, -10, 0, 30)
+speedTextBox.Position = UDim2.new(0, 5, 0, 105)
+speedTextBox.Text = tostring(flySpeed)
+speedTextBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+speedTextBox.BackgroundColor3 = Color3.fromRGB(0, 0, 0) -- Black
+speedTextBox.TextScaled = true
+speedTextBox.Parent = frame
+
+local invalidLabel = Instance.new("TextLabel")
+invalidLabel.Size = UDim2.new(1, -10, 0, 20)
+invalidLabel.Position = UDim2.new(0, 5, 0, 135)
+invalidLabel.Text = ""
+invalidLabel.TextColor3 = Color3.fromRGB(255, 0, 0)
+invalidLabel.BackgroundTransparency = 1
+invalidLabel.TextScaled = true
+invalidLabel.Parent = frame
+
+-- "by AZK" Animation
+local logoFrame = Instance.new("Frame")
+logoFrame.Size = UDim2.new(1, -10, 0, 20)
+logoFrame.Position = UDim2.new(0, 5, 0, 10)
+logoFrame.BackgroundTransparency = 1
+logoFrame.Parent = frame
+
+local letters = {"b", "y", " ", "A", "Z", "K"}
+local letterLabels = {}
+for i, letter in ipairs(letters) do
+    local label = Instance.new("TextLabel")
+    label.Size = UDim2.new(1/#letters, 0, 1, 0)
+    label.Position = UDim2.new((i-1)/#letters, 0, 0, 0)
+    label.Text = letter
+    label.TextColor3 = Color3.fromRGB(255, 255, 255)
+    label.BackgroundTransparency = 1
+    label.TextScaled = true
+    label.Rotation = 90 -- Start rotated
+    label.Parent = logoFrame
+    table.insert(letterLabels, label)
+end
+
+-- Play rolling animation once
+local function playLogoAnimation()
+    for i, label in ipairs(letterLabels) do
+        local tweenInfo = TweenInfo.new(
+            0.5, -- Duration
+            Enum.EasingStyle.Sine,
+            Enum.EasingDirection.Out,
+            0, -- Repeat count
+            false, -- Reverses
+            (i-1)*0.1 -- Delay for stagger
+        )
+        local tween = TweenService:Create(label, tweenInfo, {Rotation = 0})
+        tween:Play()
+    end
+end
+playLogoAnimation() -- Run animation on load
+
+-- Directional Buttons (Cross Layout: Straight, Up, Down, Back)
+local buttonSize = UDim2.new(0, 60, 0, 60)
+local basePosX = 0.1 -- Left side, where joystick typically is
+local basePosY = 0.6 -- Adjusted for mobile joystick area
+
+local straightButton = Instance.new("TextButton")
+straightButton.Size = buttonSize
+straightButton.Position = UDim2.new(basePosX, 0, basePosY - 0.1, 0) -- Above center (Straight)
+straightButton.Text = "🔝"
+straightButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+straightButton.BackgroundColor3 = Color3.fromRGB(0, 0, 0) -- Black
+straightButton.TextScaled = true
+straightButton.Visible = false
+straightButton.Parent = gui
+straightButton.MouseButton1Down:Connect(function() controls.f = 1 end)
+straightButton.MouseButton1Up:Connect(function() controls.f = 0 end)
+
+local upButton = Instance.new("TextButton")
+upButton.Size = buttonSize
+upButton.Position = UDim2.new(basePosX - 0.1, 0, basePosY, 0) -- Left of center (Up)
+upButton.Text = "⬅️"
+upButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+upButton.BackgroundColor3 = Color3.fromRGB(0, 0, 0) -- Black
+upButton.TextScaled = true
+upButton.Visible = false
+upButton.Parent = gui
+upButton.MouseButton1Down:Connect(function() controls.u = 1 end)
+upButton.MouseButton1Up:Connect(function() controls.u = 0 end)
+
+local downButton = Instance.new("TextButton")
+downButton.Size = buttonSize
+downButton.Position = UDim2.new(basePosX + 0.1, 0, basePosY, 0) -- Right of center (Down)
+downButton.Text = "🔜"
+downButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+downButton.BackgroundColor3 = Color3.fromRGB(0, 0, 0) -- Black
+downButton.TextScaled = true
+downButton.Visible = false
+downButton.Parent = gui
+downButton.MouseButton1Down:Connect(function() controls.d = 1 end)
+downButton.MouseButton1Up:Connect(function() controls.d = 0 end)
+
+local backButton = Instance.new("TextButton")
+backButton.Size = buttonSize
+backButton.Position = UDim2.new(basePosX, 0, basePosY + 0.1, 0) -- Below center (Back)
+backButton.Text = "⬇️"
+backButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+backButton.BackgroundColor3 = Color3.fromRGB(0, 0, 0) -- Black
+backButton.TextScaled = true
+backButton.Visible = false
+backButton.Parent = gui
+backButton.MouseButton1Down:Connect(function() controls.b = 1 end)
+backButton.MouseButton1Up:Connect(function() controls.b = 0 end)
+
+-- Draggable Functionality for Toggle Frame
+local dragging
+local dragInput
+local dragStart
+local startPos
+
+frame.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = frame.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
+end)
+
+frame.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        dragInput = input
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if dragging and input == dragInput then
+        local delta = input.Position - dragStart
+        frame.Position = UDim2.new(
+            startPos.X.Scale,
+            startPos.X.Offset + delta.X,
+            startPos.Y.Scale,
+            startPos.Y.Offset + delta.Y
+        )
+    end
+end)
+
+-- Minimize Button Functionality
+minimizeButton.MouseButton1Click:Connect(function()
+    isMinimized = not isMinimized
+    minimizeButton.Text = isMinimized and "+" or "-"
+    toggleButton.Visible = not isMinimized
+    speedLabel.Visible = not isMinimized
+    speedTextBox.Visible = not isMinimized
+    logoFrame.Visible = not isMinimized
+    invalidLabel.Visible = not isMinimized and invalidLabel.Text ~= ""
+    frame.Size = isMinimized and UDim2.new(0, 30, 0, 30) or UDim2.new(0, 150, 0, 150)
+end)
+
+-- Speed Input Validation
+speedTextBox.FocusLost:Connect(function(enterPressed)
+    if not enterPressed then return end
+    local input = speedTextBox.Text
+    local number = tonumber(input)
+    if number and number > 0 then
+        flySpeed = math.min(number, maxSpeed)
+        lastValidSpeed = flySpeed
+        speedTextBox.Text = tostring(flySpeed)
+        invalidLabel.Text = ""
+    else
+        flySpeed = lastValidSpeed
+        speedTextBox.Text = tostring(flySpeed)
+        invalidLabel.Text = "Invalid"
+        task.wait(2)
+        if invalidLabel.Text == "Invalid" then
+            invalidLabel.Text = ""
+        end
+    end
+end)
+
+-- Fly Function
+local function startFlying()
+    local character = player.Character
+    if not character then return end
+    local humanoid = character:FindFirstChildWhichIsA("Humanoid")
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    if not humanoid or not rootPart then return end
+
+    flying = true
+    humanoid.PlatformStand = true
+
+    local bodyVelocity = Instance.new("BodyVelocity")
+    bodyVelocity.MaxForce = Vector3.new(9e4, 9e4, 9e4)
+    bodyVelocity.Velocity = Vector3.new(0, 0.1, 0)
+    bodyVelocity.Parent = rootPart
+
+    local bodyGyro = Instance.new("BodyGyro")
+    bodyGyro.MaxTorque = Vector3.new(9e4, 9e4, 9e4)
+    bodyGyro.P = 9e4
+    bodyGyro.CFrame = rootPart.CFrame
+    bodyGyro.Parent = rootPart
+
+    -- Enable noclip
+    for _, part in pairs(character:GetDescendants()) do
+        if part:IsA("BasePart") then
+            part.CanCollide = false
+        end
+    end
+
+    -- Show directional buttons
+    straightButton.Visible = true
+    upButton.Visible = true
+    downButton.Visible = true
+    backButton.Visible = true
+
+    local connection
+    connection = RunService.Stepped:Connect(function()
+        if not flying or not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then
+            connection:Disconnect()
+            bodyVelocity:Destroy()
+            bodyGyro:Destroy()
+            if humanoid then humanoid.PlatformStand = false end
+            straightButton.Visible = false
+            upButton.Visible = false
+            downButton.Visible = false
+            backButton.Visible = false
+            for _, part in pairs(character and character:GetDescendants() or {}) do
+                if part:IsA("BasePart") then
+                    part.CanCollide = true
+                end
+            end
+            flying = false
+            toggleButton.Text = "Toggle"
+            return
+        end
+
+        local cam = workspace.CurrentCamera
+        local lookVector = cam.CFrame.LookVector
+        local velocity = Vector3.new(0, 0, 0)
+
+        if controls.f > 0 then velocity = velocity + lookVector * controls.f end
+        if controls.b > 0 then velocity = velocity - lookVector * controls.b end
+        if controls.u > 0 then velocity = velocity + Vector3.new(0, 1, 0) end
+        if controls.d > 0 then velocity = velocity - Vector3.new(0, 1, 0) end
+
+        if velocity.Magnitude > 0 then
+            velocity = velocity.Unit * flySpeed
+        end
+        bodyVelocity.Velocity = velocity
+        bodyGyro.CFrame = cam.CFrame
+    end)
+end
+
+-- Toggle Flying
+toggleButton.MouseButton1Click:Connect(function()
+    flying = not flying
+    toggleButton.Text = flying and "Toggle (Flying)" or "Toggle"
+    if flying then
+        startFlying()
+    end
+end)
+
+-- Keyboard Input Handling (PC Fallback)
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.KeyCode == Enum.KeyCode.W then controls.f = 1 end
+    if input.KeyCode == Enum.KeyCode.S then controls.b = 1 end
+    if input.KeyCode == Enum.KeyCode.Space then controls.u = 1 end
+    if input.KeyCode == Enum.KeyCode.LeftControl then controls.d = 1 end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.KeyCode == Enum.KeyCode.W then controls.f = 0 end
+    if input.KeyCode == Enum.KeyCode.S then controls.b = 0 end
+    if input.KeyCode == Enum.KeyCode.Space then controls.u = 0 end
+    if input.KeyCode == Enum.KeyCode.LeftControl then controls.d = 0 end
+end)
+
+-- Handle Character Respawn
+player.CharacterAdded:Connect(function(character)
+    flying = false
+    toggleButton.Text = "Toggle"
+    straightButton.Visible = false
+    upButton.Visible = false
+    downButton.Visible = false
+    backButton.Visible = false
+    -- GUI persists due to gui.ResetOnSpawn = false
+end)
